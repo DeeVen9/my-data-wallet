@@ -27,8 +27,8 @@
       const privateKey = "3cc410675f7b9104e6c8557e6e7313c3148787dd75e67bb6e5d2fb292f1f126d"
 
       // I am using JWTs for storing the Verifiable credentials in 
-      // All will have a common header. I am using HMAC SHA Algorithm, which I researched is a good enough
-      // signing algorithm. I am not an expert in this field.
+      // All will have a common header. I am using HMAC SHA Algorithm based on the tutorial, which states HS256 is a good 
+      // signing algorithm.
       const header = { alg: "HS256", cty: "JWT", typ: "JWT" }
 
       // Function to create & self sign a verifiable credential (issue)
@@ -41,7 +41,7 @@
           iss: iss,
           sub: did,
           iat: KJUR.jws.IntDate.get('now'), // current time in seconds
-          exp: KJUR.jws.IntDate.get('now + 1day'), // one day ahead is all thats needed for the demo, but in real world scenarios this would be changed to the appropiate needed length for example if the Verifiable Credential is for a drivers license it could be the Expiry date of the drivers license.
+          exp: KJUR.jws.IntDate.get('now + 1day'), // one day ahead is what I've placed for the demo, but in real world scenarios this would be changed to the appropiate length. For example, if the Verifiable Credential is for a drivers license it could be the Expiry date of the drivers license.
           jti: "http://example.com/credentials/123", //Unique id for the JWT itself, mock for demo
           nbf: KJUR.jws.IntDate.get('now'), // current time in seconds
           vc: {
