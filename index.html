@@ -1,0 +1,532 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <title>Verifiable Credentials Data Wallet Demo</title>
+    <!--Code highlighting component to display Credentials https://github.com/highlightjs/highlight.js-->
+    <link rel="stylesheet"
+      href="//cdnjs.cloudflare.com/ajax/libs/highlight.js/11.7.0/styles/vs2015.min.css">
+    <script src="//cdnjs.cloudflare.com/ajax/libs/highlight.js/11.7.0/highlight.min.js"></script>
+    <script>hljs.highlightAll()</script>
+    <!--TailwindCSS-->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- Important library to do all the signing -->
+    <script src="https://kjur.github.io/jsrsasign/jsrsasign-all-min.js"></script>
+    <script type="text/javascript">
+      // Hardcoded DID for holder
+      const did = "did:example:abcdefghijklmnopqrstuvwxyz"
+      // Hardcoded DID Document for holder with no verification info as its all mocked for this demo
+      const didDocument = {
+          '@context': 'https://www.w3.org/ns/did/v1',
+          id: did,
+          publicKey: [],
+          authentication: [],
+          service: []
+      }
+      // Hardcoded Private key for demo, in real world you would use a proper Key infrastructure, which
+      // is beyond the need for this demo
+      const privateKey = "3cc410675f7b9104e6c8557e6e7313c3148787dd75e67bb6e5d2fb292f1f126d"
+
+      // I am using JWTs for storing the Verifiable credentials in 
+      // All will have a common header. I am using HMAC SHA Algorithm, which I researched is a good enough
+      // signing algorithm. I am not an expert in this field.
+      const header = { alg: "HS256", cty: "JWT", typ: "JWT" }
+
+      // Function to create & self sign a verifiable credential (issue)
+      // Fancy way of saying function issueVC() {}
+      const issueVC = (did, type, claims) => {
+        // Hardcoded DID for issuer
+        const iss = "did:example:123456789abcdefghi"
+        // Jwt payload with the verifiable credential in the vc field
+        const payload = {
+          iss: iss,
+          sub: did,
+          iat: KJUR.jws.IntDate.get('now'), // current time in seconds
+          exp: KJUR.jws.IntDate.get('now + 1day'), // one day ahead is all thats needed for the demo, but in real world scenarios this would be changed to the appropiate needed length for example if the Verifiable Credential is for a drivers license it could be the Expiry date of the drivers license.
+          jti: "http://example.com/credentials/123", //Unique id for the JWT itself, mock for demo
+          nbf: KJUR.jws.IntDate.get('now'), // current time in seconds
+          vc: {
+            "@context": [
+              "https://www.w3.org/2018/credentials/v1"
+            ],
+            "type": ["VerifiableCredential", type],
+            "credentialSubject": {
+              "id": did,
+              ...claims
+            }
+          }
+        }
+
+        var sHeader = JSON.stringify(header)
+        var sPayload = JSON.stringify(payload)
+        const signedVC = KJUR.jws.JWS.sign('HS256', sHeader, sPayload, privateKey)
+
+        return {
+          payload, 
+          signature: signedVC
+        }
+      }
+
+      // Function to verify an issued verifiable credential
+      const verifyVC = (signedVC) => {
+        return KJUR.jws.JWS.verify(signedVC, privateKey, ["HS256"])
+      }
+
+      // Adds a notification row box to the list of notifications in the data wallet
+      // This also wires up all the button events
+      // its a bit brute force but will suffice for the demo
+      const addNotifiction = (n) => {
+        document.getElementById('no-notifications').style.visibility = "hidden"
+        
+        const container = document.getElementById('notifications-container')
+        const notificationsTemplate = document.getElementById('notification-item').content.cloneNode(true)
+
+        const elemId = 'notification-item' + KJUR.jws.IntDate.get('now').toString()
+
+        let n1 = notificationsTemplate.getElementById("dtBus")
+        n1.innerHTML = `
+        ${n.dataType}<br/>${n.business}
+        `
+
+        n1 = notificationsTemplate.getElementById("msg")
+        n1.innerHTML = `
+        ${n.message}
+        `
+
+        if (n.showActions) {
+          notificationsTemplate.getElementById("allow").style.display = 'block'
+          notificationsTemplate.getElementById("allow").pID = elemId
+          notificationsTemplate.getElementById("allow").addEventListener('click', (evt) => {
+            const e = document.getElementById(evt.currentTarget.pID)
+            const allow = e.querySelector("#allow")
+            const deny = e.querySelector("#deny")
+            const cred = e.querySelector("#notify-credential-button")
+
+            const vc = issueVC(did, "DataSharingCredential", {
+              "purpose": n.message,
+              "business": n.business,
+              "dataType": n.dataType,
+              "allow": true,
+            })
+
+            allow.style.display = 'none'
+            deny.style.display = 'none'
+
+            cred.style.display = 'block'
+            cred.addEventListener('click', () => {
+              showVC(vc)
+            })
+          })
+          notificationsTemplate.getElementById("deny").style.display = 'block'
+          notificationsTemplate.getElementById("deny").pID = elemId
+          notificationsTemplate.getElementById("deny").addEventListener('click', (evt) => {
+            const e = document.getElementById(evt.currentTarget.pID)
+            const allow = e.querySelector("#allow")
+            const deny = e.querySelector("#deny")
+            const cred = e.querySelector("#notify-credential-button")
+
+            const vc = issueVC(did, "DataSharingCredential", {
+              "purpose": n.message,
+              "business": n.business,
+              "dataType": n.dataType,
+              "allow": false,
+            })
+
+            allow.style.display = 'none'
+            deny.style.display = 'none'
+
+            cred.style.display = 'block'
+            cred.addEventListener('click', () => {
+              showVC(vc)
+            })
+          })
+        } else {
+          notificationsTemplate.getElementById("allow").style.display = 'none'
+          notificationsTemplate.getElementById("deny").style.display = 'none'
+        }
+
+        if (!n.showCredential)
+          notificationsTemplate.getElementById("notify-credential-button").style.display = 'none'
+        else {
+          notificationsTemplate.getElementById("notify-credential-button").style.display = 'block'
+          notificationsTemplate.getElementById("notify-credential-button").addEventListener('click', () => {
+            showVC(n.vc)
+          })
+        }
+
+        container.prepend(notificationsTemplate)
+        container.children[0].id = elemId
+      }
+
+      // Load Data Creditionals to the wallet
+      const loadDataCredentials = () => {
+        const credentials = [
+          {
+            dataType: "Drivers License",
+            sharedWithCount: 45,
+            imgUrl: "https://t4.ftcdn.net/jpg/02/32/92/21/360_F_232922178_YCAxIU0vlGoGY2H76ZsATswNrOVbWlUv.jpg",
+            vc: issueVC(did, "Drivers License", {
+              "datatype": "Drivers License",
+              "isValid": true,
+              "imgUrl": "https://t4.ftcdn.net/jpg/02/32/92/21/360_F_232922178_YCAxIU0vlGoGY2H76ZsATswNrOVbWlUv.jpg",
+              "notes": "Other claims to increase authenticity can be included"
+            }),
+          },
+          {
+            dataType: "Biometric Data - Fingerprint",
+            sharedWithCount: 37,
+            imgUrl: "https://images.cutimes.com/contrib/content/uploads/sites/413/2019/08/digital-fingerprint-e1567006006289.jpg",
+            vc: issueVC(did, "Biometric Data", {
+              "datatype": "Fingerprint",
+              "isValid": true,
+              "imgUrl": "https://images.cutimes.com/contrib/content/uploads/sites/413/2019/08/digital-fingerprint-e1567006006289.jpg",
+              "notes": "Other claims to increase authenticity can be included"
+            }),
+          },
+          {
+            dataType: "Passport",
+            sharedWithCount: 75,
+            imgUrl: "https://s28126.pcdn.co/blogs/ask-experian/wp-content/uploads/How-to-Protect-Yourself-From-Passport-Scams-900x586.jpg",
+            vc: issueVC(did, "Passport", {
+              "datatype": "Passport",
+              "isValid": true,
+              "imgUrl": "https://s28126.pcdn.co/blogs/ask-experian/wp-content/uploads/How-to-Protect-Yourself-From-Passport-Scams-900x586.jpg",
+              "notes": "Other claims to increase authenticity can be included"
+            }),
+          },
+        ]
+        const container = document.getElementById('data-container')
+
+        credentials.forEach((c) => {
+          const dataTemplate = document.getElementById('data-item').content.cloneNode(true)
+          let n = dataTemplate.getElementById("dt")
+          n.innerHTML = `
+          ${c.dataType}
+          `
+
+          n = dataTemplate.getElementById("shared-with")
+          n.innerHTML = `
+          Shared with ${c.sharedWithCount} companies
+          `
+
+          n = dataTemplate.getElementById("displayimage")
+          n.src = c.imgUrl
+
+          dataTemplate.getElementById("credential").addEventListener('click', () => {
+            showVC(c.vc)
+          })
+
+          container.appendChild(dataTemplate)
+        })
+      } 
+
+      // Load Consents credentials to the wallet
+      const loadConsents = () => {
+        const credentials = [
+          {
+            dataType: "Advertisements",
+            sharedWithCount: 45,
+            vc: issueVC(did, "Consent", {
+              "datatype": "Advertisements",
+              "allow": true,
+              "notes": "Other claims to increase authenticity and further specify conditions for allowed uses of the data can be included"
+            }),
+          },
+          {
+            dataType: "Targeted Ads",
+            sharedWithCount: 33,
+            vc: issueVC(did, "Consent", {
+              "datatype": "Targeted Ads",
+              "allow": false,
+              "notes": "Other claims to increase authenticity and further specify conditions for allowed uses of the data can be included"
+            }),
+          },
+          {
+            dataType: "Allow Usage Data Sharing with partners by default",
+            sharedWithCount: 99,
+            vc: issueVC(did, "Consent", {
+              "datatype": "Allow Share Usage Data with partners by default",
+              "allow": false,
+              "notes": "Other claims to increase authenticity and further specify conditions for allowed uses of the data can be included"
+            }),
+          },
+        ]
+        const container = document.getElementById('consent-container')
+
+        credentials.forEach((c) => {
+          const dataTemplate = document.getElementById('consent-item').content.cloneNode(true)
+          let n = dataTemplate.getElementById("dt")
+          n.innerHTML = `
+          ${c.dataType}
+          `
+
+          n = dataTemplate.getElementById("shared-with")
+          n.innerHTML = `
+          Shared with ${c.sharedWithCount} companies
+          `
+
+          dataTemplate.getElementById("credential").addEventListener('click', () => {
+            showVC(c.vc)
+          })
+
+          container.appendChild(dataTemplate)
+        })
+      }
+
+      // Reset the demo to the beginning state
+      const reset = () => {
+        const container = document.getElementById('notifications-container')
+        const children = container.children
+        const childrenToRemove = []
+      
+        for(var i=0; i<children.length; i++){
+            const c = children[i]
+            if (c.id !== 'no-notifications') {childrenToRemove.push(c)}
+        }
+
+        childrenToRemove.forEach((c) => container.removeChild(c))
+        
+        document.getElementById('no-notifications').style.visibility = "visible"
+      }
+
+      // This is the signup flow. It follows the script as described in the sequence diagram
+      const signupFlow = () => {
+        // Initial VC that states the consents & preferences the holder wants chirper to adhere to.
+        const consentSharedVC = issueVC(did, "ConsentAndPreferencesCredential", {
+          "AllowShareOfUsageDataByDefault": false,
+          "AllowFirstPartyAnalytics": true,
+          "AllowTargetedMarketing": true,
+          "AllowAdvertising": true,
+          "AllowTargetedAdvertising": false,
+          "AllowToUsePersonalDataToMakeProductBetter": true,
+          "AllowShareOfChirpsWithTrustedThirdPartiesByDefault": false,
+        })
+
+        const initialNotification = {
+          dataType: "Consents & Preferences", 
+          business: "Chirper", 
+          message: "We noticed you signed up for Chirper and connected your data wallet. Your Consents & Preferences have been shared with Chirper. Rest assured your privacy is protected.", 
+          showActions: false, 
+          showCredential: true,
+          vc: consentSharedVC,
+        }
+
+        addNotifiction(initialNotification)
+
+        setTimeout(() => {
+          const n = {
+            dataType: "Consents & Preferences", 
+            business: "Chirper", 
+            message: "Recieved Acknowledgement from Chirper on reciept of your privacy preferences.", 
+            showActions: false, 
+            showCredential: false,
+            vc: {},
+          }
+
+          addNotifiction(n)
+        }, 10000)
+
+        setTimeout(() => {
+          const n = {
+            dataType: "Consents & Preferences", 
+            business: "Chirper", 
+            message: "Recieved notification from Chirper that your privacy preferences have been applied, have fun using the app.", 
+            showActions: false, 
+            showCredential: false,
+            vc: {},
+          }
+
+          addNotifiction(n)
+        }, 20000)
+      }
+
+      // As per the demo script, Chirper Usage request 1, to be denied
+      const request1 = () => {
+        const n = {
+          dataType: "Usage Data", 
+          business: "Chirper", 
+          message: "Allow Chirper to share data with the California Governor Political Campaign for 30 days?", 
+          showActions: true, 
+          showCredential: false,
+          vc: {},
+        }
+
+        addNotifiction(n)
+      }
+
+      // As per the demo script, Chirper Usage request 2, to be allowed
+      const request2 = () => {
+        const n = {
+          dataType: "Usage Data", 
+          business: "Chirper", 
+          message: "Allow Chirper to share with University of California to conduct Chirping safety study for 5 days?", 
+          showActions: true, 
+          showCredential: false,
+          vc: {},
+        }
+
+        addNotifiction(n)
+      }
+
+      // show popup modal dialog with verifiable credentials
+      const showVC = (vc) => {
+        const x = document.getElementsByTagName('BODY')[0] // Select body tag because of disable scroll when modal is active
+        const modal = document.getElementById('modal') // modal
+        const modalBtn = document.getElementById('modal-button') // launch modal button
+        const modalClose = document.getElementsByClassName('modal-close') // close modal button
+
+        document.getElementById("vc-viewer").innerText = JSON.stringify(vc, null, 2)
+        modal.style.display = "flex" // Show modal
+        x.style.overflow = "hidden" //Disable scroll on body
+      }
+
+      // close the modal when you click x on the popup window
+      const closeModal = () => {
+        const x = document.getElementsByTagName('BODY')[0] // Select body tag because of disable scroll when modal is active
+        const modal = document.getElementById('modal') // modal
+        const modalBtn = document.getElementById('modal-button') // launch modal button
+        const modalClose = document.getElementsByClassName('modal-close') // close modal button
+        modal.style.display = "none" // Hide modal
+        x.style.overflow = "auto" // Active scroll on body
+      }
+
+      // Close modal when click away from modal
+      window.onclick = (event) => {
+        if (event.target == modal) {
+          const x = document.getElementsByTagName('BODY')[0] // Select body tag because of disable scroll when modal is active
+          const modal = document.getElementById('modal') // modal
+          const modalBtn = document.getElementById('modal-button') // launch modal button
+          const modalClose = document.getElementsByClassName('modal-close') // close modal button
+          modal.style.display = "none" // Hide modal
+          x.style.overflow = "auto" // Active scroll on body
+        }
+      }
+
+      const runOnLoad = () => {
+        loadDataCredentials()
+        loadConsents()
+      }
+    </script>
+  </head>
+  <body class="bg-slate-300 subpixel-antialiased text-lg" onload="runOnLoad()">
+    <main class="flex min-h-screen flex-col items-center justify-between pt-14 pr-14 pl-14 pb-24 text-lg">
+      <div class="z-10 w-full items-center justify-between font-mono text-lg lg:flex max-w-7xl">
+        <div class="fixed bottom-0 left-0 flex h-48 w-full items-end justify-center bg-gradient-to-t from-white via-white lg:static lg:h-auto lg:w-auto lg:bg-none">
+          <img src="logo.jpg" />
+        </div>
+        <p class="fixed left-0 top-0 flex w-full justify-center border-b border-gray-500 bg-gradient-to-b from-zinc-200 pb-6 pt-8 backdrop-blur-2xl lg:static lg:w-auto  lg:rounded-xl lg:border lg:bg-gray-200 lg:p-4">
+          Welcome to your Data Wallet!
+        </p>
+      </div>
+      <div class="w-full max-w-5xl text-2xl font-bold p-4 pb-10 lg:flex items-center justify-between">
+        <p class="fixed left-0 top-0 flex w-full justify-center from-zinc-200 lg:static lg:w-auto">
+          <button class="bg-blue-500 hover:bg-blue-700 text-white font-bold py-2 px-4 rounded" onclick="reset()">
+            Reset Demo
+          </button>
+        </p>
+        <p class="fixed left-0 top-0 flex w-full justify-center from-zinc-200 lg:static lg:w-auto">
+          <button class="bg-blue-500 hover:bg-blue-700 text-white font-bold py-2 px-4 rounded" onclick="signupFlow()">
+            Sign Up For Chirper
+          </button>
+        </p>
+        <p class="fixed left-0 top-0 flex w-full justify-center from-zinc-200 lg:static lg:w-auto">
+          <button class="bg-blue-500 hover:bg-blue-700 text-white font-bold py-2 px-4 rounded" onclick="request1()">
+            Chirper Request 1
+          </button>
+        </p>
+        <p class="fixed left-0 top-0 flex w-full justify-center from-zinc-200 lg:static lg:w-auto">
+          <button class="bg-blue-500 hover:bg-blue-700 text-white font-bold py-2 px-4 rounded" onclick="request2()">
+            Chirper Request 2
+          </button>
+        </p>
+      </div>
+      <div id="modal" class="hidden z-50 items-center justify-center h-screen w-screen fixed top-0 bg-black/50"> <!--Modal Dialog -->
+        <div class="bg-white max-w-5xl w-full rounded-md"> <!--Modal Content -->
+          <div class="p-3 flex items-center justify-between border-b border-b-gray-300"> <!--Modal Header -->
+            <h3 class="font-semibold text-xl">View Credential</h3>
+            <span class="modal-close cursor-pointer" onclick="closeModal()">×</span> <!-- Close Modal -->
+          </div>
+          <div class="p-3 border-b border-b-gray-300 "> <!--Modal Body -->
+            <pre><code id="vc-viewer" class="language-json max-h-96"></code></pre>
+          </div>
+          <div class="p-3 flex items-center justify-start"> <!--Modal Footer -->
+          </div>
+        </div>
+      </div>
+      <div class="w-full max-w-5xl text-2xl font-bold p-4">
+        Notifications
+      </div>
+      <div class="w-full max-w-5xl" id="notifications-container">
+        <div id="no-notifications" class="px-4 text-lime-800 font-bold">None at the moment</div>
+      </div>
+      <div class="w-full max-w-5xl py-7" id="notifications-container">
+        <div id="no-notifications" class="px-4 font-bold">The following sections are hardcoded lists for the demo. In a real world usage scenario, the wallet would allow holders to add, update and remove data & consent credentials.</div>
+      </div>
+      <div class="w-full max-w-5xl text-2xl font-bold p-4">
+        Your Data Credentials
+      </div>
+      <div class="w-full max-w-5xl" id="data-container">
+
+      </div>
+      <div class="w-full max-w-5xl text-2xl font-bold p-4">
+        Your Privacy & Consent Treatments
+      </div>
+      <div class="w-full max-w-5xl" id="consent-container">
+
+      </div>
+    </main>
+    <template id="notification-item">
+      <div class="z-10 w-full max-w-5xl items-center justify-between font-mono text-sm lg:flex border-b border-gray-300 bg-gradient-to-b from-zinc-200 pb-6 pt-8 backdrop-blur-2xl lg:static lg:rounded-xl lg:border lg:bg-gray-200 lg:p-4 mb-10">
+        <div id="dtBus" class="fixed bottom-0 left-0 flex h-48 w-full items-end justify-center bg-gradient-to-t from-white via-white lg:static lg:h-auto lg:w-auto lg:bg-none w-48">
+          <!--{dataType}<br/>{business}-->
+        </div>
+        <div id="msg" class="fixed bottom-0 left-0 flex h-48 w-full items-end justify-center bg-gradient-to-t from-white via-white lg:static lg:h-auto lg:w-auto lg:bg-none px-10">
+           <!--{message}-->
+        </div>
+        <div id="notification-actions" class="fixed bottom-0 left-0 flex h-48 w-full items-end justify-center bg-gradient-to-t from-white via-white lg:static lg:h-auto lg:w-auto lg:bg-none">
+          <button id="allow" class="bg-blue-500 hover:bg-blue-700 text-white py-1 px-4 rounded">
+            Allow
+          </button>&nbsp;
+          <button id="deny" class="bg-blue-500 hover:bg-blue-700 text-white py-1 px-4 rounded">
+            Deny
+          </button>
+          <button id="notify-credential-button" class="bg-blue-500 hover:bg-blue-700 text-white py-1 px-4 rounded w-44" >
+            View Credential
+          </button>
+        </div>
+      </div>
+    </template>
+    <template id="data-item">
+      <div class="z-10 w-full max-w-5xl items-center justify-between font-mono text-sm lg:flex border-b border-gray-300 bg-gradient-to-b from-zinc-200 pb-6 pt-8 backdrop-blur-2xl dark:border-neutral-800 dark:bg-zinc-800/30 dark:from-inherit lg:static lg:rounded-xl lg:border lg:bg-gray-200 lg:p-4 lg:dark:bg-zinc-800/30 mb-10">
+        <div id="dt" class="fixed bottom-0 left-0 flex h-48 w-full items-end justify-center bg-gradient-to-t from-white via-white dark:from-black dark:via-black lg:static lg:h-auto lg:w-auto lg:bg-none">
+          
+        </div>
+        <div id="shared-with" class="fixed bottom-0 left-0 flex h-48 w-full items-end justify-center bg-gradient-to-t from-white via-white dark:from-black dark:via-black lg:static lg:h-auto lg:w-auto lg:bg-none">
+  
+        </div>
+        <div class="fixed bottom-0 left-0 flex h-48 w-full items-end justify-center bg-gradient-to-t from-white via-white dark:from-black dark:via-black lg:static lg:h-auto lg:w-auto lg:bg-none">
+          <img id="displayimage" src="logo.jpg" width="100px"/>
+        </div>
+        <div class="fixed bottom-0 left-0 flex h-48 w-full items-end justify-center bg-gradient-to-t from-white via-white dark:from-black dark:via-black lg:static lg:h-auto lg:w-auto lg:bg-none">
+          <button id="credential" class="bg-blue-500 hover:bg-blue-700 text-white py-1 px-4 rounded">
+            View Credential
+          </button>
+        </div>
+      </div>
+    </template>
+    <template id="consent-item">
+      <div class="z-10 w-full max-w-5xl items-center justify-between font-mono text-sm lg:flex border-b border-gray-300 bg-gradient-to-b from-zinc-200 pb-6 pt-8 backdrop-blur-2xl dark:border-neutral-800 dark:bg-zinc-800/30 dark:from-inherit lg:static lg:rounded-xl lg:border lg:bg-gray-200 lg:p-4 lg:dark:bg-zinc-800/30 mb-10">
+        <div id="dt" class="fixed bottom-0 left-0 flex h-48 w-full items-end justify-center bg-gradient-to-t from-white via-white dark:from-black dark:via-black lg:static lg:h-auto lg:w-auto lg:bg-none">
+          
+        </div>
+        <div id="shared-with" class="fixed bottom-0 left-0 flex h-48 w-full items-end justify-center bg-gradient-to-t from-white via-white dark:from-black dark:via-black lg:static lg:h-auto lg:w-auto lg:bg-none">
+          
+        </div>
+        <div class="fixed bottom-0 left-0 flex h-48 w-full items-end justify-center bg-gradient-to-t from-white via-white dark:from-black dark:via-black lg:static lg:h-auto lg:w-auto lg:bg-none">
+          <button id="credential" class="bg-blue-500 hover:bg-blue-700 text-white py-1 px-4 rounded">
+            View Credential
+          </button>
+        </div>
+      </div>
+    </template>
+  </body>
+</html>
